@@ -133,10 +133,10 @@ namespace alxnbl.OneNoteMdExporter.Services.Export
 
         protected override string FinalizePageMdPostProcessing(Page page, string md)
         {
-            var res = md;
+            var res = $"# {page.Title}\n\n{md}";
 
             if (AppSettings.AddFrontMatterHeader)
-                res = AddFrontMatterHeader(page, md);
+                res = AddFrontMatterHeader(page, res);
 
             return res;
         }

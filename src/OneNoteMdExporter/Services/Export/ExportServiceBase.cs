@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Xml.Linq;
@@ -187,8 +188,15 @@ namespace alxnbl.OneNoteMdExporter.Services.Export
                 // Convert OneNote:// links to markdown links
                 pageMd = oneNoteLinkTranslatorService.ConvertOneNoteLinks(pageMd, GetPageWikilink);
 
-                // Apply post processing specific to an export format
-                pageMd = FinalizePageMdPostProcessing(page, pageMd);
+				// Skip saving if page content is empty (only whitespace / empty lines)
+				if (string.IsNullOrWhiteSpace(pageMd))
+				{
+					Log.Debug($"{page.OneNoteId}: page content is empty, skipping md file write");
+					return true;
+				}
+
+				// Apply post processing specific to an export format
+				pageMd = FinalizePageMdPostProcessing(page, pageMd);
 
                 WritePageMdFile(page, pageMd);
 
@@ -302,6 +310,10 @@ namespace alxnbl.OneNoteMdExporter.Services.Export
 
             var htmlRegex = new Regex(@"<span\s+style='" + styleRegexSearchStr + @"'>(.*?)<\/span>");
             var styleRegex = new Regex(styleRegexSearchStr);
+            var monospaceFontRegex = new Regex(@"font-family:\s*['""]?(?:Consolas|Courier New)['""]?\s*(;|$)", RegexOptions.IgnoreCase);
+            var htmlTagRegex = new Regex(@"<[^>]+>");
+            var styledSpanRegex = new Regex(@"<span\s+style='([^']*)'[^>]*>(.*?)<\/span>", RegexOptions.Singleline);
+            var inlineCodeMarkersRegex = new Regex(Regex.Escape(ConverterService.InlineCodeStartMarker) + @"[A-Za-z0-9+/=]*" + Regex.Escape(ConverterService.CodeLineEndMarker));
 
             foreach (var xmlText in xmlPageContent.Descendants(ns + "T"))
             {
@@ -313,9 +325,44 @@ namespace alxnbl.OneNoteMdExporter.Services.Export
                 }
                 XCData innerNode = xmlText.FirstNode as XCData;
                 var styleAttribute = xmlText.Attribute("style") ?? xmlText.Parent?.Attribute("style");
+                var styleValue = styleAttribute?.Value ?? "";
 
+                // Monospace font in a span of the text => inline code, content is Base64-encoded to be kept untouched by PanDoc
+                if (!monospaceFontRegex.IsMatch(styleValue) && styledSpanRegex.IsMatch(innerNode.Value))
+                {
+                    var newValue = styledSpanRegex.Replace(innerNode.Value, match =>
+                    {
+                        if (!monospaceFontRegex.IsMatch(match.Groups[1].Value.Replace("\n", "")))
+                            return match.Value;
+
+                        var plainText = WebUtility.HtmlDecode(htmlTagRegex.Replace(match.Groups[2].Value.Replace("\n", ""), ""));
+                        return ConverterService.InlineCodeStartMarker
+                            + Convert.ToBase64String(Encoding.UTF8.GetBytes(plainText))
+                            + ConverterService.CodeLineEndMarker;
+                    });
+
+                    // Merge adjacent inline code fragments
+                    newValue = new Regex("(?:" + inlineCodeMarkersRegex + "){2,}").Replace(newValue, match =>
+                    {
+                        var text = string.Concat(inlineCodeMarkersRegex.Matches(match.Value).Select(m => ConverterService.DecodeCodeMarker(m.Value)));
+                        return ConverterService.InlineCodeStartMarker
+                            + Convert.ToBase64String(Encoding.UTF8.GetBytes(text))
+                            + ConverterService.CodeLineEndMarker;
+                    });
+
+                    innerNode.Value = newValue;
+                }
+
+                // Case 0 - Monospace font => code line, content is Base64-encoded to be kept untouched by PanDoc
+                if (monospaceFontRegex.IsMatch(styleValue))
+                {
+                    var plainText = WebUtility.HtmlDecode(htmlTagRegex.Replace(innerNode.Value.Replace("\n", ""), ""));
+                    innerNode.Value = ConverterService.CodeLineStartMarker
+                        + Convert.ToBase64String(Encoding.UTF8.GetBytes(plainText))
+                        + ConverterService.CodeLineEndMarker;
+                }
                 // Case 1 - Style attribute is defined in a span html tag => Escape span tag
-                if (htmlRegex.IsMatch(innerNode.Value))
+                else if (htmlRegex.IsMatch(innerNode.Value))
                 {
 
                     var htmlRegexReplace = new Regex(@"<span\s+style='" + styleRegexReplaceStr + @"'>(.*?)<\/span>");

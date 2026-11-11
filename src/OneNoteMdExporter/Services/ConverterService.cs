@@ -118,7 +118,11 @@ namespace alxnbl.OneNoteMdExporter.Services
             }
 
             if (AppSettings.UseHtmlStyling)
+            {
+                mdFileContent = ConvertCodeLines(mdFileContent);
+                mdFileContent = ConvertInlineCode(mdFileContent);
                 mdFileContent = UnEscapeStylingSpan(mdFileContent);
+            }
 
             mdFileContent = InsertMdHighlight(mdFileContent);
 
@@ -207,6 +211,102 @@ namespace alxnbl.OneNoteMdExporter.Services
             });
 
             return pageTxtModified;
+        }
+
+        public const string CodeLineStartMarker = "«code:";
+        public const string CodeLineEndMarker = "»";
+
+        public const string InlineCodeStartMarker = "«icode:";
+
+        /// <summary>
+        /// Decode a full code marker («code:...» or «icode:...»)
+        /// </summary>
+        public static string DecodeCodeMarker(string marker)
+        {
+            var start = marker.IndexOf(':') + 1;
+            return DecodeCodeLine(marker[start..^CodeLineEndMarker.Length]);
+        }
+
+        /// <summary>
+        /// Replace inline code markers (monospace font fragments) by markdown inline code
+        /// </summary>
+        private static string ConvertInlineCode(string pageTxt)
+        {
+            return Regex.Replace(pageTxt, @"«icode:([A-Za-z0-9+/=]*)»", match =>
+            {
+                var text = DecodeCodeLine(match.Groups[1].Value);
+                var code = text.Trim();
+                if (code.Length == 0)
+                    return text;
+
+                var leading = text[..text.IndexOf(code[0])];
+                var trailing = text[(leading.Length + code.Length)..];
+
+                // Fence must be longer than the longest backtick run inside the code
+                var maxBackticks = Regex.Matches(code, "`+").Select(m => m.Length).DefaultIfEmpty(0).Max();
+                var fence = new string('`', maxBackticks + 1);
+                var padding = code.StartsWith('`') || code.EndsWith('`') ? " " : "";
+
+                return $"{leading}{fence}{padding}{code}{padding}{fence}{trailing}";
+            });
+        }
+
+        /// <summary>
+        /// Replace consecutive code line markers
+        /// </summary>
+        private static string ConvertCodeLines(string pageTxt)
+        {
+            var codeLineRegex = new Regex(@"^[ \t>]*«code:([A-Za-z0-9+/=]*)»\\?[ \t]*$");
+            var inlineCodeRegex = new Regex(@"«code:([A-Za-z0-9+/=]*)»");
+
+            var lines = Regex.Split(pageTxt, @"\r\n|\n|\r");
+            var result = new List<string>();
+            var codeBlock = new List<string>();
+            var pendingBlankLines = 0;
+
+            void FlushCodeBlock()
+            {
+                if (codeBlock.Count == 0)
+                    return;
+                result.Add("```");
+                result.AddRange(codeBlock);
+                result.Add("```");
+                codeBlock.Clear();
+            }
+
+            foreach (var line in lines)
+            {
+                var match = codeLineRegex.Match(line);
+                if (match.Success)
+                {
+                    // Blank lines between code lines are merged into the same block
+                    pendingBlankLines = 0;
+                    codeBlock.Add(DecodeCodeLine(match.Groups[1].Value));
+                }
+                else if (codeBlock.Count > 0 && string.IsNullOrWhiteSpace(line))
+                {
+                    pendingBlankLines++;
+                }
+                else
+                {
+                    FlushCodeBlock();
+                    for (; pendingBlankLines > 0; pendingBlankLines--)
+                        result.Add(string.Empty);
+                    // Code marker in the middle of a text line: keep raw text
+                    result.Add(inlineCodeRegex.Replace(line, m => DecodeCodeLine(m.Groups[1].Value)));
+                }
+            }
+
+            FlushCodeBlock();
+            for (; pendingBlankLines > 0; pendingBlankLines--)
+                result.Add(string.Empty);
+
+            return string.Join(Environment.NewLine, result);
+        }
+
+        private static string DecodeCodeLine(string base64)
+        {
+            return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64));
         }
 
         private static string UnEscapeStylingSpan(string pageTxt)
