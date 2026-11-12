@@ -3,6 +3,16 @@
 This document lists the differences between this fork and the original
 [alxnbl/onenote-md-exporter](https://github.com/alxnbl/onenote-md-exporter) repository.
 
+## Resources stored per section
+
+**Files:** `src/OneNoteMdExporter/Models/ResourceFolderLocationEnum.cs`,
+`src/OneNoteMdExporter/Services/Export/MdExportService.cs`,
+`src/OneNoteMdExporter/appSettings.json`
+
+Added the `SectionFolder` resource location, which stores attachments and image
+files in a resource folder inside each section's export folder. This is now the
+default location. `RootFolder` and `PageParentFolder` remain available.
+
 ## Skip empty pages
 
 **File:** `src/OneNoteMdExporter/Services/Export/ExportServiceBase.cs`

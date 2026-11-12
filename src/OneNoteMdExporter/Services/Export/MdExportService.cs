@@ -21,10 +21,12 @@ namespace alxnbl.OneNoteMdExporter.Services.Export
 
         protected override string GetResourceFolderPath(Page page)
         {
-            if (AppSettings.ResourceFolderLocation == ResourceFolderLocationEnum.RootFolder)
-                return Path.Combine(page.GetNotebook().ExportFolder, AppSettings.ResourceFolderName);
-            else
-                return Path.Combine(Path.GetDirectoryName(GetPageMdFilePath(page)), AppSettings.ResourceFolderName);
+            return AppSettings.ResourceFolderLocation switch
+            {
+                ResourceFolderLocationEnum.RootFolder => Path.Combine(page.GetNotebook().ExportFolder, AppSettings.ResourceFolderName),
+                ResourceFolderLocationEnum.SectionFolder => Path.Combine(page.GetNotebook().ExportFolder, page.Parent.GetPath(AppSettings.MdMaxFileLength), AppSettings.ResourceFolderName),
+                _ => Path.Combine(Path.GetDirectoryName(GetPageMdFilePath(page)), AppSettings.ResourceFolderName),
+            };
         }
 
         protected override string GetPageMdFilePath(Page page)

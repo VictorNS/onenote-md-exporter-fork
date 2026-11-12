@@ -4,5 +4,6 @@
     {
         RootFolder = 1,
         PageParentFolder = 2,
+        SectionFolder = 3,
     }
 }
